@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: proyecto-pdf-db
+    environment:
+      POSTGRES_USER: pdfuser
+      POSTGRES_PASSWORD: pdfpass
+      POSTGRES_DB: promedb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - pdf-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdfuser"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: proyecto-pdf-api
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=pdfuser
+      - DB_PASS=pdfpass
+      - DB_NAME=promedb
+      - PORT=3001
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pdf-network
+    volumes:
+      - ./backend/uploads:/app/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: proyecto-pdf-web
+    ports:
+      - "3002:80"
+    depends_on:
+      - backend
+    networks:
+      - pdf-network
+
+volumes:
+  postgres_data:
+
+networks:
+  pdf-network:
+    driver: bridge
