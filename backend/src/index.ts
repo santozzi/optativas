@@ -176,24 +176,60 @@ app.delete('/api/records/:id', async (req, res) => {
 app.get('/api/export', async (req, res) => {
   try {
     const records = await AppDataSource.getRepository(PdfRecord).find();
-    
-    const data = records.map(r => ({
-      'Apellido y Nombre': r.apellidoNombre || '',
-      'LU': r.lu || '',
-      'Código y Carrera': r.codigoCarrera || '',
-      'Plan': r.plan || '',
-      'Código y Materia': r.codigoMateria || '',
-      'Genérica Asociada': r.genericaAsociada || '',
-      'Procesado': r.procesado ? 'Sí' : 'No',
-      'Archivo': r.originalName,
-    }));
 
-    const ws = XLSX.utils.json_to_sheet(data);
+    // Build expanded rows: code[i] paired with generica[i] at same index
+    const expandedData: any[] = [];
+
+    for (const r of records) {
+      const codigos = (r.codigoMateria || '').split(',').map((c: string) => c.trim()).filter((c: string) => c.length > 0);
+      const genericas = (r.genericaAsociada || '').split(',').map((c: string) => c.trim()).filter((c: string) => c.length > 0);
+
+      const count = Math.max(codigos.length, genericas.length, 1);
+      const base = {
+        'Apellido y Nombre': r.apellidoNombre || '',
+        'LU': r.lu || '',
+        'Código y Carrera': r.codigoCarrera || '',
+        'Plan': r.plan || '',
+        'Procesado': r.procesado ? 'Sí' : 'No',
+        'Archivo': r.originalName,
+      };
+
+      for (let i = 0; i < count; i++) {
+        expandedData.push({
+          ...base,
+          'Código y Materia': codigos[i] || '',
+          'Genérica Asociada': genericas[i] || '',
+        });
+      }
+    }
+
+    const ws = XLSX.utils.json_to_sheet(expandedData);
+
+    // Merge columns A-F (0-5) for rows that have multiple entries
+    // Data rows start at Excel row 1 (row 0 is the header)
+    let rowIndex = 1;
+    for (const r of records) {
+      const codigos = (r.codigoMateria || '').split(',').map((c: string) => c.trim()).filter((c: string) => c.length > 0);
+      const genericas = (r.genericaAsociada || '').split(',').map((c: string) => c.trim()).filter((c: string) => c.length > 0);
+      const count = Math.max(codigos.length, genericas.length, 1);
+
+      if (count > 1) {
+        ws['!merges'] = ws['!merges'] || [];
+        for (let col = 0; col <= 5; col++) {
+          ws['!merges'].push({
+            s: { r: rowIndex, c: col },
+            e: { r: rowIndex + count - 1, c: col },
+          });
+        }
+      }
+      rowIndex += count;
+    }
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Inscripciones');
-    
+
     const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' });
-    
+
     res.setHeader('Content-Disposition', 'attachment; filename=inscripciones.xlsx');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.send(excelBuffer);
