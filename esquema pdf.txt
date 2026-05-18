@@ -1,0 +1,23 @@
+el pdf tiene lo siguiente:
+Titulo: Solicitud de Plan de Materias Optativas \n
+Datos : son 7 saltos de linea en cada renglon seguido de : esta el dato referido es decir L.U.: 119051 significa que el lu = 119051:
+1 L.U.:
+2 Nro. de inscripcion:
+3 Apellido y Nombre:
+4 Tipo y Nro. de documento:
+5 Carrera:
+6 Plan:
+7 Orientación:
+En el cuerpo hay dos tablas:
+1 Pedidos de Optativas Vigentes
+2 COMPLETAR los campos de TODAS las materias elegidas
+El ecabezado de la 1 es:
+Materia Código Fecha Pedido Plan
+La tabla 2 es distinta:
+fila 1 Año:
+fila 2 Periodo Lectivo:
+fila 3 Mat. Genérica:
+fila 4 en el caso del lu 119051 es Musica y Salud (20135)
+las filas 3 y 4 pueden repetirse con otros datos
+luego puede repetirse fila 1,2,3,4 con otros datos
+despues hay una tabla con un mapeo de matrias codigo pero no me interesa esa informacion

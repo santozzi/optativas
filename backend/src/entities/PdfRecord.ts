@@ -11,23 +11,37 @@ export class PdfRecord {
   @Column()
   originalName!: string;
 
-  @Column({ nullable: true })
-  apellidoNombre!: string;
-
+  // ── Header ──
   @Column({ nullable: true })
   lu!: string;
 
   @Column({ nullable: true })
-  codigoCarrera!: string;
+  nombre!: string;
+
+  @Column({ nullable: true })
+  documento!: string;
+
+  @Column({ nullable: true })
+  inscripcion!: string;
+
+  @Column({ nullable: true })
+  carrera!: string;
+
+  @Column({ nullable: true })
+  orientacion!: string;
 
   @Column({ nullable: true })
   plan!: string;
 
-  @Column({ nullable: true })
-  codigoMateria!: string;
+  // ── Materias optativas pedidas ──
+  // Array JSON: [{materia, codigo, fechaPedido, plan}]
+  @Column({ type: 'text', nullable: true })
+  materiasJson!: string;
 
-  @Column({ nullable: true })
-  genericaAsociada!: string;
+  // ── Anuales (materias genéricas por año/periodo) ──
+  // Array JSON: [{año, periodoLectivo, generica: [{código, tipo, carrera, plan, materia}]}]
+  @Column({ type: 'text', nullable: true })
+  anualesJson!: string;
 
   @Column({ default: false })
   procesado!: boolean;
