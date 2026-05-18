@@ -9,7 +9,7 @@ export interface Datos {
 }
 
 export const procesarDatos = (texto: string): Datos => {
-  const regex = /L\.?U\.?:\s*(?<lu>.+)\r?\n\s*Nro\.?\s*de\s*Inscripción:\s*(?<inscripcion>.+)\r?\n\s*Apellido\s+y\s+Nombre:\s*(?<nombre>.+)\r?\n\s*Tipo\s+y\s+Nro\.?\s*de\s+Documento:\s*(?<documento>.+)\r?\n\s*Carrera:\s*(?<carrera>.+)\r?\n\s*Plan:\s*(?<plan>.+)\r?\n\s*Orientación:\s*(?<orientacion>.+)/;
+  const regex = /L\.?U\.?:\s*(?<lu>.+)\r?\n\s*Nro\.?\s*de\s*Inscripción:\s*(?<inscripcion>.+)\r?\n\s*Apellido\s+y\s+Nombre:\s*(?<nombre>.+)\r?\n\s*Tipo\s+y\s+Nro\.?\s*de\s*Documento:\s*(?<documento>.+)\r?\n\s*Carrera:\s*(?<carrera>.+)\r?\n\s*Plan:\s*(?<plan>.+)\r?\n\s*Orientación:\s*(?<orientacion>.+)/;
 
   const match = texto.match(regex);
   if (!match?.groups) {
@@ -35,41 +35,95 @@ export const procesarPedidoOptativas = (texto: string): RawMateriaOptativa[] => 
 
   const bloque = match[1];
 
-  // — Formato OCR: todo en una sola línea —
-  // "MODULO ELECTIVO 20070 06/11/2025 2023" (espacios simples entre campos)
+  // ── Intento 1: formato pdftotext normal (líneas separadas por campo) ──
   const lineas = bloque.split(/\r?\n/).map(l => l.trim()).filter(l => l);
-  if (lineas.length === 1) {
-    const singleLine = lineas[0];
-    // Si la línea tiene exactamente un código (5 dígitos), una fecha (dd/mm/yyyy)
-    // y un plan (4 dígitos) → parsear
-    const codigoMatch = singleLine.match(/(\d{5})/);
-    const fechaMatch = singleLine.match(/(\d{2}\/\d{2}\/\d{4})/);
-    const planMatch = singleLine.match(/\b(20\d{2})\b(?!.*\d{5})/); // plan al final
-    if (codigoMatch && fechaMatch) {
-      const nombre = singleLine.substring(0, singleLine.indexOf(codigoMatch[1])).trim();
-      const codigo = codigoMatch[1];
-      const fecha = fechaMatch[1];
-      // Plan: todo lo que quede después de la fecha que sea un año tipo 20xx
-      const despuesFecha = singleLine.substring(singleLine.indexOf(fechaMatch[1]) + fechaMatch[1].length).trim();
-      const planMatch2 = despuesFecha.match(/^(20\d{2})/);
-      const plan = planMatch2 ? planMatch2[1] : despuesFecha.replace(/\D/g, '').substring(0, 4);
-      return [{ materia: nombre, codigo, fechaPedido: fecha, plan }];
-    }
-  }
-
-  // — Formato normal pdftotext: una línea por campo —
   const filtered = lineas.filter(l =>
     l && l !== 'Materia' && l !== 'Código' && l !== 'Fecha Pedido' && l !== 'Plan'
   );
   const resultado: RawMateriaOptativa[] = [];
-  for (let i = 0; i + 3 < filtered.length; i += 4) {
-    resultado.push({
-      materia: filtered[i] || '',
-      codigo: filtered[i + 1] || '',
-      fechaPedido: filtered[i + 2] || '',
-      plan: filtered[i + 3] || '',
-    });
+
+  if (filtered.length >= 3) {
+    // Grupo de a 3 (materia, codigo, fechaPedido) — líneas intermedias vacías se descartan
+    let i = 0;
+    while (i + 2 < filtered.length) {
+      const materia = filtered[i] || '';
+      const codigo = filtered[i + 1] || '';
+      const fechaPedido = filtered[i + 2] || '';
+      // Solo agregar si la materia y al menos uno de codigo o fecha tiene contenido
+      if (materia && (codigo || fechaPedido)) {
+        resultado.push({ materia, codigo, fechaPedido, plan: '' });
+      }
+      i += 3;
+    }
+    if (resultado.length > 0) return resultado;
   }
+
+  // Si no hay al menos 3 líneas, fallback al intento 2
+
+  // ── Intento 2: fallback OCR — parse por fecha en cada línea ──
+  const skipHeaders = new Set([
+    'Materia', 'Código', 'Fecha Pedido', 'Plan',
+    'Pedidos de Optativas Vigentes', 'Pedido de Optativas Vigentes',
+  ]);
+
+  for (const linea of lineas) {
+    if (skipHeaders.has(linea)) continue;
+    if (/^(Materia|Código|Fecha|Pedido|Periodo|Plan)$/i.test(linea)) continue;
+
+    const fechaMatch = linea.match(/(\d{2}\/\d{2}\/\d{4})/);
+    if (!fechaMatch) continue;
+
+    const fechaIdx = linea.indexOf(fechaMatch[1]);
+    const fecha = fechaMatch[1];
+
+    const despuesFecha = linea.substring(fechaIdx + fechaMatch[1].length).trim();
+    const planMatch = despuesFecha.match(/^(20\d{2})/);
+    const plan = planMatch ? planMatch[1] : '';
+
+    const antesFecha = linea.substring(0, fechaIdx).trim();
+    const codigoMatch = antesFecha.match(/(\d{5})/);
+    let nombre = '';
+    let codigo = '';
+
+    if (codigoMatch) {
+      const codigoIdx = antesFecha.indexOf(codigoMatch[1]);
+      nombre = antesFecha.substring(0, codigoIdx).trim();
+      nombre = nombre.replace(/\s+[a-z]$/i, '').trim();
+      codigo = codigoMatch[1];
+    } else {
+      nombre = antesFecha.replace(/\s+[a-z]$/i, '').trim();
+      codigo = '';
+    }
+
+    if (!nombre) continue;
+    resultado.push({ materia: nombre, codigo, fechaPedido: fecha, plan });
+  }
+
+  // ── Intento 3: cada línea del bloque tiene "MATERIA FECHA" o "MATERIA CODIGO FECHA" ──
+  // Agrupa tokens no vacíos de a 3 (materia, codigo, fecha) sin importar saltos de línea
+  if (resultado.length === 0) {
+    const tokens = bloque.split(/\r?\n/).map(l => l.trim()).filter(l => l && !skipHeaders.has(l));
+    const parsed: RawMateriaOptativa[] = [];
+    let i = 0;
+    while (i + 2 < tokens.length) {
+      const tok1 = tokens[i];
+      const tok2 = tokens[i + 1];
+      const tok3 = tokens[i + 2];
+      // Si tok2 parece un código (5 dígitos) o fecha, o está vacío → ok
+      if (tok1 && tok3.match(/\d{2}\/\d{2}\/\d{4}/)) {
+        // Buscar plan después de la fecha en tok3
+        const fechaMatch3 = tok3.match(/(\d{2}\/\d{2}\/\d{4})/);
+        const fechaIdx3 = fechaMatch3 ? tok3.indexOf(fechaMatch3[1]) : -1;
+        const plan = fechaMatch3
+          ? tok3.substring(fechaIdx3 + fechaMatch3[1].length).trim().match(/^(20\d{2})/)?.[1] || ''
+          : '';
+        parsed.push({ materia: tok1, codigo: tok2 || '', fechaPedido: fechaMatch3 ? fechaMatch3[1] : tok3, plan });
+      }
+      i += 3;
+    }
+    if (parsed.length > 0) return parsed;
+  }
+
   return resultado;
 };
 
@@ -113,11 +167,6 @@ export const matriasGenericas = (texto: string): RawAnual[] => {
 
     if (linea.startsWith('Mat. Genérica:')) {
       const parte = linea.replace('Mat. Genérica:', '').trim();
-      // Formato flexible: "CODIGO - Descripción [, Carrera] [plan|Plan] NNNN [Puntos Requeridos: NNN]"
-      // Ejemplos:
-      //   "G0950 - Optativa de Medicina, plan 2023 Puntos Requeridos: 100"
-      //   "GM001 - Módulo Electivo, Medicina, Plan 2023 Puntos Requeridos: 100"
-      //   "60951 - Optativa de Medicina, plan 2023 Puntos Requeridos: 100"
       const gm = parte.match(/^([A-Z0-9]+)\s*-\s*(.+?),\s*(plan\s*\d+.*?)\s*$/i);
       if (gm) {
         const planNum = (gm[3] || '').match(/(\d+)/)?.[1] || '0';
@@ -140,7 +189,6 @@ export const matriasGenericas = (texto: string): RawAnual[] => {
       continue;
     }
 
-    // Materia: "NOMBRE (codigo)" — limpiar "v" residual al final de línea
     const cleanLine = linea.replace(/\s+v\s*$/, '');
     const materiaMatch = cleanLine.match(/^(.*)\s*\((\d+)\)$/);
     if (materiaMatch && genericaActual) {
