@@ -5,6 +5,7 @@ import multer from 'multer';
 import { DataSource } from 'typeorm';
 import { PdfRecord } from './entities/PdfRecord';
 import * as XLSX from 'xlsx';
+import AdmZip from 'adm-zip';
 import path from 'path';
 import fs from 'fs';
 import { extractDataFromPDF } from './services/ocr';
@@ -243,83 +244,168 @@ app.get('/api/export', async (req, res) => {
         })
       : records;
 
-    // ── Build expanded rows ──
-    const expandedData: any[] = [];
+    // ── Build AOA (array of arrays) ──
+    const HEADERS = ['Apellido y Nombre', 'LU', 'Código y Carrera', 'Plan', 'Código y Materia', 'Genérica Asociada'];
 
+    const dataBorder = {
+      top:    { style: 'thin' as const, color: { rgb: '000000' } },
+      bottom: { style: 'thin' as const, color: { rgb: '000000' } },
+      left:   { style: 'thin' as const, color: { rgb: '000000' } },
+      right:  { style: 'thin' as const, color: { rgb: '000000' } },
+    };
+    const styleLeft = {
+      alignment: { horizontal: 'left' as const, vertical: 'center' as const, wrapText: true },
+      border: dataBorder, font: { sz: 10 },
+    };
+    const styleRight = {
+      alignment: { horizontal: 'center' as const, vertical: 'center' as const, wrapText: true },
+      border: dataBorder, font: { sz: 10 },
+    };
+
+    const makeCell = (v: string, s: object) => ({ t: 's' as const, v, s });
+
+    // Header row
+    const aoa: any[][] = [HEADERS.map(h => makeCell(h, styleRight))];
+
+    // Data rows + track merges
+    const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = [];
+
+    let recordIndex = 0;
     for (const r of filteredRecords) {
       const mats = r.materiasJson ? JSON.parse(r.materiasJson) : [];
       const anualesRaw = r.anualesJson ? JSON.parse(r.anualesJson) : [];
 
-      const allGenericas: { codigo: string; nombre: string }[] = [];
+      const filteredGenericas: { codigo: string; nombre: string }[] = [];
       for (const a of anualesRaw) {
         if (filtroAnio > 0 && a.año !== filtroAnio) continue;
         for (const g of (a.generica || [])) {
-          allGenericas.push({
+          filteredGenericas.push({
             codigo: g.código || '',
             nombre: g.materia ? `${g.materia.código} - ${g.materia.nombre}` : '',
           });
         }
       }
 
-      const count = Math.max(mats.length, allGenericas.length, 1);
-      const base = {
-        'Apellido y Nombre': r.nombre || '',
-        'LU': r.lu || '',
-        'Código y Carrera': r.carrera || '',
-        'Plan': r.plan || '',
-        'Código y Materia': '',
-        'Genérica Asociada': '',
-      };
+      const count = Math.max(mats.length, filteredGenericas.length, 1);
+
+      const startRow = aoa.length;
 
       for (let i = 0; i < count; i++) {
         const mat = mats[i];
-        const gen = allGenericas[i];
-        expandedData.push({
-          ...base,
-          'Código y Materia': mat ? `${mat.codigo} - ${mat.materia}` : '',
-          'Genérica Asociada': gen ? `${gen.codigo} - ${gen.nombre}` : '',
-        });
+        const gen = filteredGenericas[i];
+        aoa.push([
+          makeCell(r.nombre || '', styleLeft),
+          makeCell(r.lu || '', styleRight),
+          makeCell(r.carrera || '', styleLeft),
+          makeCell(r.plan || '', styleRight),
+          makeCell(mat ? `${mat.codigo} - ${mat.materia}` : '', styleRight),
+          makeCell(gen ? `${gen.codigo} - ${gen.nombre}` : '', styleRight),
+        ]);
       }
+
+      if (count > 1) {
+        for (let col = 0; col <= 3; col++) {
+          merges.push({
+            s: { r: startRow, c: col },
+            e: { r: startRow + count - 1, c: col },
+          });
+        }
+      }
+
+      recordIndex++;
     }
 
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(expandedData);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
     XLSX.utils.book_append_sheet(wb, ws, 'Inscripciones');
 
-    // ── Merges ──
-    let rowIndex = 1;
-    for (const r of filteredRecords) {
-      const mats = r.materiasJson ? JSON.parse(r.materiasJson) : [];
-      const anualesRaw = r.anualesJson ? JSON.parse(r.anualesJson) : [];
-      let genericasCount = 0;
-      for (const a of anualesRaw) {
-        if (filtroAnio > 0 && a.año !== filtroAnio) continue;
-        genericasCount += (a.generica || []).length;
-      }
-      const count = Math.max(mats.length, genericasCount, 1);
-      if (count > 1) {
-        ws['!merges'] = ws['!merges'] || [];
-        for (let col = 0; col <= 3; col++) {
-          ws['!merges'].push({ s: { r: rowIndex, c: col }, e: { r: rowIndex + count - 1, c: col } });
-        }
-      }
-      rowIndex += count;
-    }
-
+    ws['!merges'] = merges;
     ws['!cols'] = [
-      { wch: 28 }, // A
+      { wch: 30 }, // A
       { wch: 12 }, // B
-      { wch: 10 }, // C
-      { wch: 10 }, // D
-      { wch: 14 }, // E
-      { wch: 18 }, // F
+      { wch: 14 }, // C
+      { wch: 12 }, // D
+      { wch: 22 }, // E
+      { wch: 35 }, // F
     ];
 
+    // ── Write and patch with AdmZip for full style control ──
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' });
+
+    const zip = new AdmZip(buf);
+
+    // Grayscale palette for print:
+    // Header:  #3F4F5F  (dark blue-gray, legible but not harsh)
+    // Row A:   #F5F5F5  (very light gray)
+    // Row B:   #EBEBEB  (medium-light gray)
+    const customStylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2">
+    <font><sz val="10"/><name val="Calibri"/></font>
+    <font><sz val="11"/><b/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+  </fonts>
+  <fills count="5">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF3F4F5F"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFF5F5F5"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFEBEBEB"/></patternFill></fill>
+  </fills>
+  <borders count="2">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+    <border>
+      <left style="thin"><color rgb="FF000000"/></left>
+      <right style="thin"><color rgb="FF000000"/></right>
+      <top style="thin"><color rgb="FF000000"/></top>
+      <bottom style="thin"><color rgb="FF000000"/></bottom>
+    </border>
+  </borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="4">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <!-- s=1: header -->
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1">
+      <alignment horizontal="center" vertical="center"/>
+    </xf>
+    <!-- s=2: data row light gray -->
+    <xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1">
+      <alignment horizontal="left" vertical="center" wrapText="1"/>
+    </xf>
+    <!-- s=3: data row medium gray -->
+    <xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1">
+      <alignment horizontal="left" vertical="center" wrapText="1"/>
+    </xf>
+  </cellXfs>
+</styleSheet>`;
+
+    zip.updateFile('xl/styles.xml', Buffer.from(customStylesXml));
+
+    // Add s attribute to each cell: header row = s="1", data rows alternate s="2"/s="3"
+    const sheetEntry = zip.getEntry('xl/worksheets/sheet1.xml');
+    if (sheetEntry) {
+      let sheetXml = sheetEntry.getData()!.toString('utf8');
+
+      sheetXml = sheetXml.replace(/<c r="([A-Z]+\d+)"([^>]*)>/g, (full: string, ref: string, attrs: string): string => {
+        const rowMatch = ref.match(/(\d+)$/);
+        const excelRow = rowMatch ? parseInt(rowMatch[1]) : 1;
+        let sIdx;
+        if (excelRow === 1) {
+          sIdx = 1; // header
+        } else {
+          // excelRow 2,4,6... = light gray (s=2), excelRow 3,5,7... = medium gray (s=3)
+          sIdx = excelRow % 2 === 0 ? 2 : 3;
+        }
+        return `<c r="${ref}" s="${sIdx}"${attrs}>`;
+      });
+
+      zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(sheetXml));
+    }
+
+    const finalBuffer = zip.toBuffer();
 
     res.setHeader('Content-Disposition', 'attachment; filename=inscripciones.xlsx');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buf);
+    res.send(finalBuffer);
   } catch (err) {
     console.error('[Export] Error:', err);
     res.status(500).json({ error: 'Error exporting to Excel' });
