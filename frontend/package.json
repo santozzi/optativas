@@ -1,5 +1,8 @@
 {
   "name": "proyecto-pdf-frontend",
+  "author": {
+    "name": "Sergio Antozzi",
+    "email": "sergio.antozzi@uns.edu.ar"},
   "private": true,
   "version": "1.0.0",
   "type": "module",

@@ -1,5 +1,8 @@
 {
   "name": "proyecto-pdf-backend",
+  "author": {
+    "name": "Sergio Antozzi",
+    "email": "sergio.antozzi@uns.edu.ar"},
   "version": "1.0.0",
   "description": "Backend API for PDF processing project",
   "main": "dist/index.js",

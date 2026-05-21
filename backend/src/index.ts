@@ -66,7 +66,49 @@ app.post('/api/upload', upload.array('pdfs', 100), async (req, res) => {
     const files = req.files as Express.Multer.File[];
     const recordRepo = AppDataSource.getRepository(PdfRecord);
 
+    // ── Paso 1: extraer LU de cada PDF antes de procesar ──
+    const fileLuMap: { file: Express.Multer.File; lu: string }[] = [];
     for (const file of files) {
+      const pdfPath = path.join(__dirname, '../uploads', file.filename);
+      let lu = '';
+      if (fs.existsSync(pdfPath)) {
+        try {
+          const result = await extractDataFromPDF(pdfPath);
+          lu = result.lu || '';
+        } catch (e) {
+          console.error('[Upload] OCR error:', e);
+        }
+      }
+      fileLuMap.push({ file, lu });
+    }
+
+    // ── Paso 2: detectar duplicados vs nuevos ──
+    const lus = fileLuMap.map(f => f.lu).filter(Boolean);
+    let existentes: string[] = [];
+    if (lus.length > 0) {
+      const duplicates = await recordRepo
+        .createQueryBuilder('record')
+        .where('record.lu IN (:...lus)', { lus })
+        .getMany();
+      existentes = duplicates.map(r => r.lu);
+    }
+
+    const nuevos: typeof fileLuMap = [];
+    const duplicados: { nombre: string; lu: string }[] = [];
+
+    for (const { file, lu } of fileLuMap) {
+      if (lu && existentes.includes(lu)) {
+        duplicados.push({ nombre: file.originalname, lu });
+        // eliminar archivo temporal
+        const pdfPath = path.join(__dirname, '../uploads', file.filename);
+        if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
+        continue;
+      }
+      nuevos.push({ file, lu });
+    }
+
+    // ── Paso 3: procesar y guardar los nuevos ──
+    for (const { file, lu } of nuevos) {
       const pdfPath = path.join(__dirname, '../uploads', file.filename);
 
       let result = { lu:'', carrera:'', documento:'', inscripcion:'', nombre:'', orientacion:'', plan:'', materias:[] as any[], anuales:[] as any[] };
@@ -76,10 +118,10 @@ app.post('/api/upload', upload.array('pdfs', 100), async (req, res) => {
       if (fs.existsSync(pdfPath)) {
         try {
           result = await extractDataFromPDF(pdfPath);
+          result.lu = lu || result.lu;
           materiasJson = JSON.stringify(result.materias || []);
           anualesJson = JSON.stringify(result.anuales || []);
           console.log(result);
-          
         } catch (e) {
           console.error('[Upload] OCR error:', e);
         }
@@ -103,7 +145,11 @@ app.post('/api/upload', upload.array('pdfs', 100), async (req, res) => {
       await recordRepo.save(record);
     }
 
-    res.json({ message: 'Files uploaded and processed successfully', count: files.length });
+    res.json({
+      message: `Files uploaded successfully`,
+      count: nuevos.length,
+      duplicates: duplicados,
+    });
   } catch (err) {
     console.error('[Upload] Error:', err);
     res.status(500).json({ error: 'Error uploading files' });

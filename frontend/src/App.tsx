@@ -157,6 +157,61 @@ function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id
   );
 }
 
+/* ──────────────── Duplicates Modal ──────────────── */
+function DuplicatesModal({ duplicates, onClose }: { duplicates: { nombre: string; lu: string }[]; onClose: () => void }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 2000,
+      background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      animation: 'fadeIn 0.2s ease',
+    }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{
+        background: '#fff', borderRadius: 16, padding: '32px 28px', maxWidth: 480, width: '90%',
+        boxShadow: '0 25px 60px rgba(0,0,0,0.25)',
+        border: '1px solid #fecdd3',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: 17, fontWeight: 700, color: '#111827' }}>Archivos duplicados</div>
+              <div style={{ fontSize: 13, color: '#6b7280' }}>{duplicates.length} archivo(s) no se cargaron</div>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: '#f3f4f6', border: 'none', borderRadius: 8, padding: 8, cursor: 'pointer', color: '#6b7280', display: 'flex' }}><IconClose /></button>
+        </div>
+        <p style={{ margin: '0 0 16px 0', fontSize: 14, color: '#374151', lineHeight: 1.6 }}>
+          Los siguientes archivos <strong>ya existen en la base de datos</strong> (misma LU) y no fueron cargados:
+        </p>
+        <div style={{ background: '#fef2f2', borderRadius: 10, border: '1px solid #fecaca', overflow: 'hidden' }}>
+          {duplicates.map((d, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
+              borderBottom: i < duplicates.length - 1 ? '1px solid #fecaca' : 'none',
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.nombre}</div>
+                <div style={{ fontSize: 12, color: '#dc2626', marginTop: 2 }}>LU: {d.lu}</div>
+              </div>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+              </svg>
+            </div>
+          ))}
+        </div>
+        <button onClick={onClose} style={{ marginTop: 20, width: '100%', padding: '12px 24px', backgroundColor: '#dc2626', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>
+          Entendido
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ──────────────── Toggle Switch ──────────────── */
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: () => void }) {
   return (
@@ -240,6 +295,8 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
+  const [duplicatesModal, setDuplicatesModal] = useState<{ nombre: string; lu: string }[]>([]);
+
   const uploadFiles = async () => {
     if (files.length === 0) return;
     setUploading(true); setUploadProgress(0);
@@ -251,7 +308,14 @@ function App() {
       const res = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
       const result = await res.json();
       clearSim(); setUploadProgress(100);
-      showToast(`${result.count} archivo(s) subido(s) correctamente`, 'success');
+
+      if (result.duplicates && result.duplicates.length > 0) {
+        setDuplicatesModal(result.duplicates);
+        showToast(`${result.count} archivo(s) subido(s), ${result.duplicates.length} duplicado(s) omitido(s)`, 'error');
+      } else {
+        showToast(`${result.count} archivo(s) subido(s) correctamente`, 'success');
+      }
+
       setFiles(prev => prev.map(fp => ({ ...fp, status: 'processing', progress: 100 })));
       setTimeout(() => { fetchRecords().then(() => { showToast('OCR completado y registros actualizados', 'success'); setFiles([]); }); }, 2000);
     } catch (err) {
@@ -366,6 +430,7 @@ function App() {
       `}</style>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      {duplicatesModal.length > 0 && <DuplicatesModal duplicates={duplicatesModal} onClose={() => setDuplicatesModal([])} />}
 
       <div style={{ padding: '28px 32px', maxWidth: 1440, margin: '0 auto', animation: 'fadeIn 0.4s ease' }}>
         {/* Header */}

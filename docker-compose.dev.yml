@@ -50,6 +50,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: proyecto-pdf-web-dev
+    environment:
+      - VITE_API_HOST=proyecto-pdf-api-dev
+      - VITE_API_PORT=3013
     ports:
       - "3014:80"
     depends_on:
