@@ -1,22 +1,22 @@
-# docker-compose.yml — Producción (master)
-# Usar: docker compose up
-# Puertos: 5432 (DB), 3001 (API), 3002 (Web)
+# docker-compose.dev.yml — Desarrollo (dev branch)
+# Usar: docker compose -f docker-compose.dev.yml up
+# Puertos: 5434 (DB), 3013 (API), 3014 (Web)
 version: '3.8'
 
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: proyecto-pdf-db
+    container_name: proyecto-pdf-db-dev
     environment:
       POSTGRES_USER: pdfuser
       POSTGRES_PASSWORD: pdfpass
       POSTGRES_DB: promedb
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_dev:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5434:5432"
     networks:
-      - pdf-network
+      - pdf-network-dev
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pdfuser"]
       interval: 5s
@@ -27,21 +27,21 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: proyecto-pdf-api
+    container_name: proyecto-pdf-api-dev
     environment:
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=pdfuser
       - DB_PASS=pdfpass
       - DB_NAME=promedb
-      - PORT=3001
+      - PORT=3013
     ports:
-      - "3001:3001"
+      - "3013:3013"
     depends_on:
       postgres:
         condition: service_healthy
     networks:
-      - pdf-network
+      - pdf-network-dev
     volumes:
       - ./backend/uploads:/app/uploads
 
@@ -49,17 +49,17 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: proyecto-pdf-web
+    container_name: proyecto-pdf-web-dev
     ports:
-      - "3002:80"
+      - "3014:80"
     depends_on:
       - backend
     networks:
-      - pdf-network
+      - pdf-network-dev
 
 volumes:
-  postgres_data:
+  postgres_data_dev:
 
 networks:
-  pdf-network:
+  pdf-network-dev:
     driver: bridge
