@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { AppDataSource } from '../index';
 import { PdfRecord } from '../entities/PdfRecord';
 import { extractDataFromPDF } from '../services/ocr';
+import { exportRecordsToExcel } from '../services/excelExport';
 import path from 'path';
 import fs from 'fs';
 
@@ -246,111 +247,7 @@ export async function exportExcel(req: Request, res: Response) {
   try {
     const filtroAnio = req.query.anio ? parseInt(String(req.query.anio)) : 0;
     const records = await recordRepo().find();
-
-    const filteredRecords = filtroAnio > 0
-      ? records.filter(r => {
-          const anuales = r.anualesJson ? JSON.parse(r.anualesJson) : [];
-          return anuales.some((a: any) => a.año === filtroAnio);
-        })
-      : records;
-
-    const XLSX = require('xlsx');
-    const AdmZip = require('adm-zip');
-
-    const HEADERS = ['Apellido y Nombre', 'LU', 'Documento', 'Inscripción', 'Código y Materia', 'Genérica Asociada'];
-    const data: any[] = [HEADERS];
-
-    const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = [];
-
-    for (const r of filteredRecords) {
-      const mats = r.materiasJson ? JSON.parse(r.materiasJson) : [];
-      const anualesRaw = r.anualesJson ? JSON.parse(r.anualesJson) : [];
-
-      const filteredGenericas: { codigo: string; nombre: string }[] = [];
-      for (const a of anualesRaw) {
-        if (filtroAnio > 0 && a.año !== filtroAnio) continue;
-        for (const g of (a.generica || [])) {
-          filteredGenericas.push({ codigo: g.código || '', nombre: g.materia ? `${g.materia.código} - ${g.materia.nombre}` : '' });
-        }
-      }
-
-      const count = Math.max(mats.length, filteredGenericas.length, 1);
-      const startRow = data.length;
-
-      for (let i = 0; i < count; i++) {
-        const mat = mats[i];
-        const gen = filteredGenericas[i];
-        data.push([
-          r.nombre || '',
-          r.lu || '',
-          r.documento || '',
-          r.inscripcion || '',
-          mat ? `${mat.codigo} - ${mat.materia}` : '',
-          gen ? `${gen.codigo} - ${gen.nombre}` : '',
-        ]);
-      }
-
-      if (count > 1) {
-        for (let col = 0; col < 4; col++) {
-          merges.push({ s: { r: startRow, c: col }, e: { r: startRow + count - 1, c: col } });
-        }
-      }
-    }
-
-    const ws = XLSX.utils.aoa_to_sheet(data);
-    ws['!cols'] = [{ wch: 30 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 22 }, { wch: 40 }];
-    ws['!merges'] = merges;
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Inscripciones');
-    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' });
-    const zip = new AdmZip(buf);
-
-    const customStylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <fonts count="2">
-    <font><sz val="10"/><name val="Calibri"/></font>
-    <font><sz val="11"/><b/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
-  </fonts>
-  <fills count="5">
-    <fill><patternFill patternType="none"/></fill>
-    <fill><patternFill patternType="gray125"/></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FF3F4F5F"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFF5F5F5"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFEBEBEB"/></patternFill></fill>
-  </fills>
-  <borders count="2">
-    <border><left/><right/><top/><bottom/><diagonal/></border>
-    <border>
-      <left style="thin"><color rgb="FF000000"/></left>
-      <right style="thin"><color rgb="FF000000"/></right>
-      <top style="thin"><color rgb="FF000000"/></top>
-      <bottom style="thin"><color rgb="FF000000"/></bottom>
-    </border>
-  </borders>
-  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="4">
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
-  </cellXfs>
-</styleSheet>`;
-
-    zip.updateFile('xl/styles.xml', Buffer.from(customStylesXml));
-
-    const sheetEntry = zip.getEntry('xl/worksheets/sheet1.xml');
-    if (sheetEntry) {
-      const sheetXml = sheetEntry.getData().toString('utf8');
-      const patched = sheetXml.replace(/<c r="([A-F])(\d+)"([^>]*)>/g, (_full: string, col: string, row: string, attrs: string): string => {
-        const excelRow = parseInt(row);
-        const sIdx = excelRow === 1 ? 1 : (excelRow % 2 === 0 ? 2 : 3);
-        return `<c r="${col}${row}" s="${sIdx}"${attrs}>`;
-      });
-      zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(patched));
-    }
-
-    const finalBuffer = zip.toBuffer();
+    const finalBuffer = exportRecordsToExcel(records, filtroAnio);
 
     res.setHeader('Content-Disposition', 'attachment; filename=inscripciones.xlsx');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

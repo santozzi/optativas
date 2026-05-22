@@ -168,7 +168,7 @@ export interface RawAnual {
   generica: RawGenerica[];
 }
 
-export const matriasGenericas = (texto: string): RawAnual[] => {
+export const materiasGenericas = (texto: string): RawAnual[] => {
   const regex = /COMPLETAR los campos con TODAS las materias elegidas([\s\S]*?)(?:Materias optativas del plan ofrecidas para el período lectivo actual|$)/i;
   const match = texto.match(regex);
   if (!match) return [];
@@ -205,8 +205,9 @@ export const matriasGenericas = (texto: string): RawAnual[] => {
     if (linea.startsWith('Periodo Lectivo:')) {
       if (bloqueActual && bloqueActual.generica.length > 0) {
         anuales.push(bloqueActual);
-        bloqueActual = { año: inferredYear, periodoLectivo: '', generica: [] };
-        inferredYear = inferredYear >= 6 ? inferredYear + 1 : 6;
+        const nextYear = inferredYear >= 6 ? inferredYear + 1 : 6;
+        bloqueActual = { año: nextYear, periodoLectivo: '', generica: [] };
+        inferredYear = nextYear;
       }
       startBlockIfMissing();
       if (bloqueActual) bloqueActual.periodoLectivo = linea.replace('Periodo Lectivo:', '').trim();
@@ -259,3 +260,6 @@ export const matriasGenericas = (texto: string): RawAnual[] => {
   if (bloqueActual) anuales.push(bloqueActual);
   return anuales;
 };
+
+// Compatibilidad con imports viejos mientras se migra el nombre con typo.
+export const matriasGenericas = materiasGenericas;

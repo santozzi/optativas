@@ -2,7 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf';
 import { execSync } from 'child_process';
-import { Datos, procesarDatos, procesarPedidoOptativas, matriasGenericas } from './texto';
+import { Datos, procesarDatos, procesarPedidoOptativas, materiasGenericas } from './texto';
+import { repairExtraction } from './extractionRepair';
 
 export interface MateriaOptativa {
   materia: string;
@@ -124,7 +125,7 @@ export async function extractDataFromPDF(pdfPath: string): Promise<ExtraccionRes
   // Materias genericas/anuales
   const anuales: Anual[] = [];
   try {
-    const rawAnuales = matriasGenericas(text);
+    const rawAnuales = materiasGenericas(text);
     if (Array.isArray(rawAnuales)) {
       for (const a of rawAnuales) {
         anuales.push({
@@ -138,65 +139,7 @@ export async function extractDataFromPDF(pdfPath: string): Promise<ExtraccionRes
     console.log('[Parse] matriasGenericas falló:', e);
   }
 
-  const carreraPlanYear = (datos.plan || '').match(/20\d{2}/)?.[0] || '';
-  const normalizeName = (value: string) => value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/Ñ/g, 'N')
-    .replace(/[^A-Z0-9]+/gi, ' ')
-    .trim()
-    .toUpperCase();
-
-  const materiasByName = new Map<string, MateriaOptativa>();
-  for (const materia of materias) {
-    if (!materia.plan && carreraPlanYear) materia.plan = carreraPlanYear;
-    materiasByName.set(normalizeName(materia.materia), materia);
-  }
-
-  for (const anual of anuales) {
-    for (const generica of anual.generica) {
-      if (!generica.materia) continue;
-      if (!generica.materia.código) {
-        const genericaName = normalizeName(generica.materia.nombre);
-        const match = [...materiasByName.values()].find(m => {
-          const materiaName = normalizeName(m.materia);
-          return materiaName === genericaName || materiaName.startsWith(genericaName) || genericaName.startsWith(materiaName);
-        });
-        if (match) generica.materia.código = match.codigo;
-      }
-    }
-  }
-
-  const invalidMaterias = materias.length > 0 && materias.some(m =>
-    !/^\d{4,6}$/.test(m.codigo) || !/^\d{2}\/\d{2}\/\d{4}$/.test(m.fechaPedido)
-  );
-
-  if (invalidMaterias) {
-    const fallbackGenericas = anuales
-      .filter(a => a.año !== 6)
-      .flatMap(a => a.generica)
-      .filter(g => g.materia?.nombre && g.materia?.código);
-
-    if (fallbackGenericas.length > 0) {
-      const datePlanByCode = new Map<string, { fechaPedido: string; plan: string }>();
-      const codeDateRegex = /(\d{4,6})\s*\n+\s*(\d{2}\/\d{2}\/\d{4})(?:\s+((?:20)?\d{2,4}))?/g;
-      for (const match of text.matchAll(codeDateRegex)) {
-        const plan = match[3] && /^20\d{2}$/.test(match[3]) ? match[3] : carreraPlanYear;
-        datePlanByCode.set(match[1], { fechaPedido: match[2], plan: plan || '' });
-      }
-
-      materias.splice(0, materias.length, ...fallbackGenericas.map(g => {
-        const codigo = g.materia?.código || '';
-        const datePlan = datePlanByCode.get(codigo);
-        return {
-          materia: g.materia?.nombre || '',
-          codigo,
-          fechaPedido: datePlan?.fechaPedido || '',
-          plan: datePlan?.plan || carreraPlanYear,
-        };
-      }));
-    }
-  }
+  repairExtraction({ plan: datos.plan || '', materias, anuales, rawText: text });
 
   return {
     lu: datos.lu || '',
