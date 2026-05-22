@@ -38,9 +38,36 @@ export const procesarPedidoOptativas = (texto: string): RawMateriaOptativa[] => 
   // ── Intento 1: formato pdftotext normal (líneas separadas por campo) ──
   const lineas = bloque.split(/\r?\n/).map(l => l.trim()).filter(l => l);
   const filtered = lineas.filter(l =>
-    l && l !== 'Materia' && l !== 'Código' && l !== 'Fecha Pedido' && l !== 'Plan'
+    l &&
+    !/^(Materia|C[oó]digo|Fecha Pedido|Plan)$/i.test(l) &&
+    !/^C[oó]digo\s+Fecha\s+Pedido\s+Plan$/i.test(l)
   );
   const resultado: RawMateriaOptativa[] = [];
+
+  const isDate = (value: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(value);
+  const isCode = (value: string) => /^\d{4,6}$/.test(value);
+  const isPlan = (value: string) => /^20\d{2}(?:\s*\/\s*\d+)?$/.test(value);
+
+  // Microsoft Print to PDF suele dejar cada celda en una línea:
+  // materia, código, fecha pedido, plan.
+  const microsoftRows: RawMateriaOptativa[] = [];
+  for (let i = 0; i < filtered.length; i++) {
+    const materia = filtered[i];
+    const codigo = filtered[i + 1];
+    const fechaPedido = filtered[i + 2];
+    const plan = filtered[i + 3];
+
+    if (materia && codigo && fechaPedido && isCode(codigo) && isDate(fechaPedido)) {
+      microsoftRows.push({
+        materia,
+        codigo,
+        fechaPedido,
+        plan: plan && isPlan(plan) ? plan : '',
+      });
+      i += plan && isPlan(plan) ? 3 : 2;
+    }
+  }
+  if (microsoftRows.length > 0) return microsoftRows;
 
   if (filtered.length >= 3) {
     // Grupo de a 3 (materia, codigo, fechaPedido) — líneas intermedias vacías se descartan
@@ -142,7 +169,7 @@ export interface RawAnual {
 }
 
 export const matriasGenericas = (texto: string): RawAnual[] => {
-  const regex = /COMPLETAR los campos con TODAS las materias elegidas([\s\S]*?)Materias optativas del plan ofrecidas para el período lectivo actual/i;
+  const regex = /COMPLETAR los campos con TODAS las materias elegidas([\s\S]*?)(?:Materias optativas del plan ofrecidas para el período lectivo actual|$)/i;
   const match = texto.match(regex);
   if (!match) return [];
 
@@ -150,28 +177,50 @@ export const matriasGenericas = (texto: string): RawAnual[] => {
   const anuales: RawAnual[] = [];
   let bloqueActual: RawAnual | null = null;
   let genericaActual: RawGenerica | null = null;
+  let inferredYear = 3;
+
+  const normalizeGenericCode = (codigo: string) => {
+    const clean = codigo.trim().toUpperCase();
+    const ocrG = clean.match(/^6(\d{4})$/);
+    return ocrG ? `G${ocrG[1]}` : clean;
+  };
+
+  const startBlockIfMissing = () => {
+    if (!bloqueActual) {
+      bloqueActual = { año: inferredYear, periodoLectivo: '', generica: [] };
+    }
+  };
 
   for (let i = 0; i < lineas.length; i++) {
     const linea = lineas[i];
 
     if (linea.startsWith('Año:')) {
       if (bloqueActual) anuales.push(bloqueActual);
-      bloqueActual = { año: parseInt(linea.replace('Año:', '').trim()) || 0, periodoLectivo: '', generica: [] };
+      const año = parseInt(linea.replace('Año:', '').trim()) || inferredYear;
+      bloqueActual = { año, periodoLectivo: '', generica: [] };
+      inferredYear = año >= 6 ? año + 1 : 6;
       continue;
     }
 
     if (linea.startsWith('Periodo Lectivo:')) {
+      if (bloqueActual && bloqueActual.generica.length > 0) {
+        anuales.push(bloqueActual);
+        bloqueActual = { año: inferredYear, periodoLectivo: '', generica: [] };
+        inferredYear = inferredYear >= 6 ? inferredYear + 1 : 6;
+      }
+      startBlockIfMissing();
       if (bloqueActual) bloqueActual.periodoLectivo = linea.replace('Periodo Lectivo:', '').trim();
       continue;
     }
 
-    if (linea.startsWith('Mat. Genérica:')) {
-      const parte = linea.replace('Mat. Genérica:', '').trim();
+    if (/Gen[eé]rica:/i.test(linea)) {
+      startBlockIfMissing();
+      const parte = linea.replace(/^.*?Gen[eé]rica:/i, '').trim();
       const gm = parte.match(/^([A-Z0-9]+)\s*-\s*(.+?),\s*(plan\s*\d+.*?)\s*$/i);
       if (gm) {
         const planNum = (gm[3] || '').match(/(\d+)/)?.[1] || '0';
         genericaActual = {
-          código: gm[1],
+          código: normalizeGenericCode(gm[1]),
           tipo: gm[2].trim(),
           carrera: '',
           plan: parseInt(planNum),
@@ -190,9 +239,20 @@ export const matriasGenericas = (texto: string): RawAnual[] => {
     }
 
     const cleanLine = linea.replace(/\s+v\s*$/, '');
-    const materiaMatch = cleanLine.match(/^(.*)\s*\((\d+)\)$/);
+    const materiaMatch = cleanLine.match(/^(.*?)\s*\((\d+)\)\s*[^A-Za-z0-9]*$/);
     if (materiaMatch && genericaActual) {
       genericaActual.materia = { nombre: materiaMatch[1].trim(), código: materiaMatch[2] };
+      continue;
+    }
+
+    if (
+      genericaActual &&
+      !genericaActual.materia &&
+      /[A-ZÁÉÍÓÚÑ]/.test(cleanLine) &&
+      !/^Puntos Requeridos:/i.test(cleanLine) &&
+      !/^\d+$/.test(cleanLine)
+    ) {
+      genericaActual.materia = { nombre: cleanLine.trim(), código: '' };
     }
   }
 
