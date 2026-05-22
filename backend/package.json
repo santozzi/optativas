@@ -19,9 +19,11 @@
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
     "pdf-parse-new": "^2.0.0",
+    "pdf2pic": "^1.0.7",
     "pdf2json": "^4.0.3",
     "pdfjs-dist": "^3.11.174",
     "pg": "^8.11.3",
+   
     "reflect-metadata": "^0.2.1",
     "typeorm": "^0.3.19",
     "xlsx": "^0.18.5"

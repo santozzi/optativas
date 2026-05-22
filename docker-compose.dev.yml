@@ -1,6 +1,6 @@
 # docker-compose.dev.yml — Desarrollo (dev branch)
 # Usar: docker compose -f docker-compose.dev.yml up
-# Puertos: 5434 (DB), 3013 (API), 3014 (Web)
+# Puertos: 5434 (DB), 3013 (API Node ext), 3014 (Web)
 version: '3.8'
 
 services:
@@ -29,14 +29,14 @@ services:
       dockerfile: Dockerfile
     container_name: proyecto-pdf-api-dev
     environment:
-      - DB_HOST=postgres
+      - DB_HOST=proyecto-pdf-db-dev
       - DB_PORT=5432
       - DB_USER=pdfuser
       - DB_PASS=pdfpass
       - DB_NAME=promedb
-      - PORT=3013
+      - PORT=3001
     ports:
-      - "3013:3013"
+      - "3013:3001"
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,13 +52,31 @@ services:
     container_name: proyecto-pdf-web-dev
     environment:
       - VITE_API_HOST=proyecto-pdf-api-dev
-      - VITE_API_PORT=3013
+      - VITE_API_PORT=3001
     ports:
       - "3014:80"
     depends_on:
       - backend
     networks:
       - pdf-network-dev
+
+  backend-python:
+    build:
+      context: ./backend-python
+      dockerfile: Dockerfile
+    container_name: proyecto-pdf-python-dev
+    environment:
+      - DB_HOST=proyecto-pdf-db-dev
+      - DB_PORT=5432
+      - DB_USER=pdfuser
+      - DB_PASS=pdfpass
+      - DB_NAME=promedb
+    ports:
+      - "3020:5000"
+    networks:
+      - pdf-network-dev
+    volumes:
+      - ./backend-python/uploads:/app/uploads
 
 volumes:
   postgres_data_dev:

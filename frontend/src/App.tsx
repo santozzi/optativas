@@ -33,7 +33,7 @@ interface PdfRecord {
   orientacion: string;
   plan: string;
   materias: MateriaOptativa[];
-  anuales: Anual[];
+  generica: Anual[];
   procesado: boolean;
   createdAt: string;
 }
@@ -391,33 +391,24 @@ function App() {
     const matchSearch = !q || (r.nombre || '').toLowerCase().includes(q) || (r.lu || '').includes(q) || (r.carrera || '').toLowerCase().includes(q) || (r.documento || '').includes(q) || (r.inscripcion || '').includes(q);
     if (!matchSearch) return false;
     if (filtroAnio === 0) return true; // "todos"
-    return (r.anuales || []).some(a => a.año === filtroAnio);
+    return (r.generica || []).some(a => a.año === filtroAnio);
   });
 
   const processedCount = records.filter(r => r.procesado).length;
 
   // Años disponibles en los registros
-  const añosDisponibles = [...new Set((records.flatMap(r => (r.anuales || []).map(a => a.año)) as number[]).filter(Boolean))].sort();
+  const añosDisponibles = [...new Set((records.flatMap(r => (r.generica || []).map(a => a.año)) as number[]).filter(Boolean))].sort();
 
-  // Para la vista expandida por año
-  type ExpandYear = 0 | 3 | 6;
-  const [expandedYears, setExpandedYears] = useState<Record<string, ExpandYear[]>>({});
-
-  const toggleYear = (recordId: string, año: number) => {
-    setExpandedYears(prev => {
-      const current = prev[recordId] || [];
-      const filtered = current.filter(y => y !== año);
-      if (filtered.length === current.length) {
-        // no estaba — agregarlo
-        return { ...prev, [recordId]: [...current, año as ExpandYear] };
-      } else {
-        // estaba — sacarlo
-        return { ...prev, [recordId]: filtered as ExpandYear[] };
-      }
-    });
+  // ── Obtener genéricas visibles para un registro según filtroAnio ──
+  const getGenericasVisibles = (record: PdfRecord) => {
+    const todas = record.generica || [];
+    if (filtroAnio === 0) {
+      // Mostrar todas las genéricas flattenedas
+      return todas.flatMap(a => a.generica);
+    }
+    const anioData = todas.find(a => a.año === filtroAnio);
+    return anioData ? anioData.generica : [];
   };
-
-  const isYearExpanded = (recordId: string, año: number) => (expandedYears[recordId] || []).includes(año as ExpandYear);
 
   return (
     <>
@@ -586,60 +577,19 @@ function App() {
                               {record.orientacion && <div style={{ color: '#9ca3af', fontSize: 11, marginTop: 2 }}>{record.orientacion}</div>}
                             </td>
                             <td style={{ padding: '14px 16px', fontSize: 13 }}>{record.plan || <span style={{ color: '#d1d5db' }}>—</span>}</td>
-                            <td style={{ padding: '14px 12px', maxWidth: 220 }}>
-                              {/* Badges de años disponibles */}
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                                {(record.anuales || []).map((a, ai) => (
-                                  <button key={ai} onClick={() => toggleYear(record.id, a.año)}
-                                    style={{
-                                      padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-                                      border: '1px solid',
-                                      borderColor: isYearExpanded(record.id, a.año) ? '#2563eb' : '#e5e7eb',
-                                      backgroundColor: isYearExpanded(record.id, a.año) ? '#eff6ff' : '#f9fafb',
-                                      color: isYearExpanded(record.id, a.año) ? '#1d4ed8' : '#6b7280',
-                                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
-                                    }}>
-                                    Año {a.año}
-                                    {isYearExpanded(record.id, a.año) && a.generica.length > 0 && (
-                                      <span style={{ fontSize: 10, color: '#9ca3af' }}>{a.generica.length}m</span>
-                                    )}
-                                  </button>
-                                ))}
-                                {(!record.anuales || record.anuales.length === 0) && <span style={{ color: '#d1d5db', fontSize: 12 }}>Sin materias</span>}
-                              </div>
-                              {/* Detalle expandido */}
-                              {isYearExpanded(record.id, 0) && record.anuales?.map((a, ai) => (
-                                <div key={ai} style={{ marginTop: 8, padding: '8px 10px', background: '#f9fafb', borderRadius: 8, border: '1px solid #e5e7eb' }}>
-                                  <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', marginBottom: 6 }}>Año {a.año} — {a.periodoLectivo}</div>
-                                  {a.generica.map((g, gi) => (
-                                    <div key={gi} style={{ marginBottom: 5, fontSize: 11 }}>
-                                      <span style={{ fontWeight: 700, color: '#374151' }}>{g.código}</span>
-                                      <span style={{ color: '#9ca3af', marginLeft: 6 }}>{g.tipo}</span>
-                                      {g.materia && <div style={{ color: '#2563eb', marginTop: 2, fontWeight: 600 }}>{g.materia.nombre} ({g.materia.código})</div>}
-                                    </div>
-                                  ))}
-                                  {a.generica.length === 0 && <div style={{ color: '#d1d5db', fontSize: 11 }}>Sin genericas</div>}
-                                </div>
-                              ))}
+                            <td style={{ padding: '14px 12px', maxWidth: 280 }}>
                               {(() => {
-                                const expanded = expandedYears[record.id] || [];
-                                return expanded.filter(y => y !== 0).map(año => {
-                                  const a = record.anuales?.find(an => an.año === año);
-                                  if (!a) return null;
-                                  return (
-                                    <div key={año} style={{ marginTop: 8, padding: '8px 10px', background: '#eff6ff', borderRadius: 8, border: '1px solid #bfdbfe' }}>
-                                      <div style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8', marginBottom: 6 }}>Año {a.año} — {a.periodoLectivo}</div>
-                                      {a.generica.map((g, gi) => (
-                                        <div key={gi} style={{ marginBottom: 5, fontSize: 11 }}>
-                                          <span style={{ fontWeight: 700, color: '#374151' }}>{g.código}</span>
-                                          <span style={{ color: '#9ca3af', marginLeft: 6 }}>{g.tipo}</span>
-                                          {g.materia && <div style={{ color: '#2563eb', marginTop: 2, fontWeight: 600 }}>{g.materia.nombre} ({g.materia.código})</div>}
-                                        </div>
-                                      ))}
-                                      {a.generica.length === 0 && <div style={{ color: '#9ca3af', fontSize: 11 }}>Sin genericas</div>}
-                                    </div>
-                                  );
-                                });
+                                const genericas = getGenericasVisibles(record);
+                                if (genericas.length === 0) return <span style={{ color: '#d1d5db', fontSize: 12 }}>Sin materias</span>;
+                                return genericas.map((g, gi) => (
+                                  <div key={gi} style={{ marginBottom: 5, fontSize: 11 }}>
+                                    <span style={{ fontWeight: 700, color: '#374151' }}>{g.código}</span>
+                                    <span style={{ color: '#9ca3af', marginLeft: 6 }}>{g.tipo}</span>
+                                    {g.materia && (
+                                      <div style={{ color: '#2563eb', marginTop: 2, fontWeight: 600 }}>{g.materia.nombre} ({g.materia.código})</div>
+                                    )}
+                                  </div>
+                                ));
                               })()}
                             </td>
                             <td style={{ padding: '14px 16px' }}>
