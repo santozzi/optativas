@@ -7,6 +7,7 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: proyecto-pdf-db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: pdfuser
       POSTGRES_PASSWORD: pdfpass
@@ -28,6 +29,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: proyecto-pdf-api
+    restart: unless-stopped
     environment:
       - DB_HOST=postgres
       - DB_PORT=5432
@@ -35,8 +37,6 @@ services:
       - DB_PASS=pdfpass
       - DB_NAME=promedb
       - PORT=3001
-    ports:
-      - "3001:3001"
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,8 +50,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: proyecto-pdf-web
+    restart: unless-stopped
     ports:
-      - "3002:80"
+      - "3003:80"
     depends_on:
       - backend
     networks:
